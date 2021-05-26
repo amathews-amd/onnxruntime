@@ -168,17 +168,134 @@ __device__ __inline__ T _Max(T a, T b) { return a > b ? a : b; }
 template <typename T>
 __device__ __inline__ T _Abs(T a) { return a > (T)0 ? a : -a; }
 
+/////////////////////////////////////
+#define BUILTIN_RCP_F32 __builtin_amdgcn_rcpf
+#define MATH_FAST_RCP(X) BUILTIN_RCP_F32(X)
+#define BUILTIN_FMA_F32 __builtin_fmaf
+#define BUILTIN_MAD_F32 __ocml_fma_f32
+//__ocml_fmuladd_f32
+#define MATH_MAD(A,B,C) BUILTIN_MAD_F32(A, B, C)
+#define BUILTIN_ABS_F32 __builtin_fabsf
+#define AS_FLOAT(X) __builtin_astype(X, float)
+#define PINFBITPATT_SP32  0x7f800000
+#define BUILTIN_COPYSIGN_F32 __builtin_copysignf
+
+
+__device__ __inline__ float erfcx_new_private(float x)
+{
+    float n = x - 2.0f;
+    float d = x + 2.0f;
+    float r = MATH_FAST_RCP(d);
+    float q = n * r;
+    float e = BUILTIN_FMA_F32(-q, x, BUILTIN_FMA_F32(q + 1.0f, -2.0f, x));
+    q = BUILTIN_FMA_F32(r, e, q);
+
+    float p = MATH_MAD(q, MATH_MAD(q, MATH_MAD(q, MATH_MAD(q,
+              MATH_MAD(q, MATH_MAD(q, MATH_MAD(q, MATH_MAD(q,
+              MATH_MAD(q,
+                  -0x1.adf188p-12f, -0x1.45aea6p-10f),
+                  0x1.5a5f68p-10f), 0x1.1b44cep-7f),
+                  -0x1.082b62p-7f), -0x1.bc143p-5f),
+                  0x1.4ffc54p-3f), -0x1.5407fap-3f),
+                  -0x1.7bf616p-4f), 0x1.1ba038p-2);
+    float tx = x + x;
+    d = 1.0f + tx;
+    r = MATH_FAST_RCP(d);
+    q = BUILTIN_FMA_F32(p, r, r);
+    e = BUILTIN_FMA_F32(-q, tx, 1.0f) + (p - q);
+    q = BUILTIN_FMA_F32(r, e, q);
+    return q;
+}
+
+__device__ __inline__ float erfcx_new(float x)
+{
+    float ax = BUILTIN_ABS_F32(x);
+    float ret;
+
+    if (ax < 0x1.41bbf8p+3f) {
+        ret =  erfcx_new_private(ax); //MATH_PRIVATE(erfcx)(ax);
+    } else {
+        float r = MATH_FAST_RCP(0x1.0p-2f * ax);
+        float t = r*r * 0x1.0p-4f;
+        float p = MATH_MAD(t, MATH_MAD(t, MATH_MAD(t, MATH_MAD(t,
+                      6.5625f, -1.875f), 0.75f), -0.5f), 1.0f);
+        ret = 0x1.20dd76p-3f * r * p;
+    }
+
+    if (x < 0.0f) {
+        float x2h = x*x;
+        float x2l = BUILTIN_FMA_F32(x, x, -x2h);
+        float e = __ocml_exp_f32(x2h); //MATH_MANGLE(exp)(x2h);
+        ret = BUILTIN_FMA_F32(2.0f, BUILTIN_FMA_F32(e, x2l, e), -ret);
+        ret = x < -0x1.2d6abcp+3f ? INFINITY : ret; // AS_FLOAT(PINFBITPATT_SP32) : ret;
+    }
+
+    return ret;
+}
+
+__device__ __inline__ float erfc_new(float x)
+{
+    float ax = BUILTIN_ABS_F32(x);
+    float x2h = -x*x;
+    float x2l = BUILTIN_FMA_F32(-x, x, -x2h);
+    float e = __ocml_exp_f32(x2h); //MATH_MANGLE(exp)(x2h);
+    e = BUILTIN_FMA_F32(e, x2l, e);
+    float ret = e * erfcx_new(ax); //MATH_PRIVATE(erfcx)(ax);
+    ret = ax > 0x1.41bbf8p+3f ? 0.0f : ret;
+    float nret = 2.0f - ret;
+    return x < 0.0f ? nret : ret;
+}
+
+
+__device__ __inline__ float normcdff_2ae92e(float x)
+{
+    const float chi = -0x1.6a09e6p-1f;
+    const float clo = -0x1.9fcef4p-27f;
+    const float b = 0x1.c57228p+3f;
+    x = BUILTIN_ABS_F32(x) > b ? BUILTIN_COPYSIGN_F32(b, x) : x;
+    float thi = chi * x;
+    float tlo = BUILTIN_FMA_F32(clo, x, BUILTIN_FMA_F32(chi, x, -thi));
+    float yhi = thi + tlo;
+    float ylo = tlo - (yhi - thi);
+    float r = erfc_new(yhi); //MATH_MANGLE(erfc)(yhi);
+    float dr = -2.0f * yhi * r;
+    dr = x >= -1.0f ? 0.0f : dr;
+    r = BUILTIN_FMA_F32(ylo, dr, r);
+    return 0.5f * r;
+}
+
+__device__ __inline__ float normcdff_resimplified(float x)
+{
+    float x2 = x*x;
+    float p = x*BUILTIN_FMA_F32(x2, BUILTIN_FMA_F32(x2, 0x1.cbea4cp-13f, -0x1.29e076p-4f), -0x1.988424p+0f);
+    return 1.0f / (1.0f + __ocml_exp_f32(p));
+}
+
+
+#undef BUILTIN_RCP_F32
+#undef MATH_FAST_RCP
+#undef BUILTIN_FMA_F32
+#undef BUILTIN_MAD_F32
+#undef MATH_MAD
+#undef BUILTIN_ABS_F32
+#undef AS_FLOAT
+#undef PINFBITPATT_SP32
+#undef BUILTIN_COPYSIGN_F32
+////////////////////////////////////
+
+
+
 template <typename T>
 __device__ __inline__ T _Normcdf(T a);
 
 template <>
-__device__ __inline__ float _Normcdf(float a) { return normcdff(a); }
+__device__ __inline__ float _Normcdf(float a) { return normcdff_2ae92e(a); }
 
 template <>
 __device__ __inline__ double _Normcdf(double a) { return normcdf(a); }
 
 template <>
-__device__ __inline__ half _Normcdf(half a) { return half(normcdff((float)a)); }
+__device__ __inline__ half _Normcdf(half a) { return half(normcdff_2ae92e((float)a)); }
 
 template <typename T>
 __device__ __inline__ T _Gelu(T a) {
