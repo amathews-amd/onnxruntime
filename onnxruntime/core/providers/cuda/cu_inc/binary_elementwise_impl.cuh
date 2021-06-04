@@ -151,6 +151,7 @@ __global__ void _BinaryElementWiseRhsPerChannelBatchN(
   T1 lvalue[NumElementsPerThread];
   T2 rvalue[NumElementsPerThread];
 
+#ifndef __HIP_PLATFORM_HCC__
   CUDA_LONG id = start;
 #pragma unroll
   for (int i = 0; i < NumElementsPerThread; i++) {
@@ -176,6 +177,25 @@ __global__ void _BinaryElementWiseRhsPerChannelBatchN(
       id += NumThreadsPerBlock;
     }
   }
+#else
+#pragma unroll
+  for (int id = start; id < (start+NumElementsPerThread) && id < N; id++) {
+      CUDA_LONG rhs_id = fdm_H.div(id);
+      int q, r;
+      fdm_C.divmod(rhs_id, q, r);
+      rhs_id = r;
+
+      int i = id-start;
+      lvalue[i] = lhs_data[id];
+      rvalue[i] = rhs_data[rhs_id];
+  }
+
+#pragma unroll
+  for (int id = start; id < (start+NumElementsPerThread) && id < N; id++) {
+      int i = id-start;
+      output_data[id] = func(lvalue[i], rvalue[i]);
+  }
+#endif
 }
 
 template <typename T, typename T1, typename T2, typename FuncT>

@@ -34,6 +34,7 @@ struct fast_divmod {
   }
 
   __host__ __device__ inline int div(int n) const {
+    if( d_ == 1 ) return n;
 #ifdef __CUDA_ARCH__
     uint32_t t = __umulhi(M_, n);
     return (t + n) >> l_;
