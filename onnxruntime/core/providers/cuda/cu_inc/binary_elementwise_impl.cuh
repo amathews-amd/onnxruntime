@@ -179,7 +179,7 @@ __global__ void _BinaryElementWiseRhsPerChannelBatchN(
   }
 #else
 #pragma unroll
-  for (int id = start; id < (start+NumElementsPerThread) && id < N; id++) {
+  for (int id = start; id < (start+NumElementsPerThread) && id < N; id += NumThreadsPerBlock) {
       CUDA_LONG rhs_id = fdm_H.div(id);
       int q, r;
       fdm_C.divmod(rhs_id, q, r);
@@ -191,7 +191,7 @@ __global__ void _BinaryElementWiseRhsPerChannelBatchN(
   }
 
 #pragma unroll
-  for (int id = start; id < (start+NumElementsPerThread) && id < N; id++) {
+  for (int id = start; id < (start+NumElementsPerThread) && id < N; id += NumThreadsPerBlock) {
       int i = id-start;
       output_data[id] = func(lvalue[i], rvalue[i]);
   }
